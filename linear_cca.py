@@ -2,10 +2,11 @@ import numpy
 
 
 class linear_cca():
-    def __init__(self):
+    def __init__(self, r3, r4):
         self.w = [None, None]
         self.m = [None, None]
-
+        self.r3 = r3
+        self.r4 = r4
     def fit(self, H1, H2, outdim_size):
         """
         An implementation of linear CCA
@@ -16,8 +17,8 @@ class linear_cca():
             A and B: the linear transformation matrices
             mean1 and mean2: the means of data for both views
         """
-        r1 = 1e-4
-        r2 = 1e-4
+        r3 = self.r3
+        r4 = self.r4
 
         m = H1.shape[0]
         o1 = H1.shape[1]
@@ -30,9 +31,9 @@ class linear_cca():
 
         SigmaHat12 = (1.0 / (m - 1)) * numpy.dot(H1bar.T, H2bar)
         SigmaHat11 = (1.0 / (m - 1)) * numpy.dot(H1bar.T,
-                                                 H1bar) + r1 * numpy.identity(o1)
+                                                 H1bar) + r3 * numpy.identity(o1)
         SigmaHat22 = (1.0 / (m - 1)) * numpy.dot(H2bar.T,
-                                                 H2bar) + r2 * numpy.identity(o2)
+                                                 H2bar) + r4 * numpy.identity(o2)
 
         [D1, V1] = numpy.linalg.eigh(SigmaHat11)
         [D2, V2] = numpy.linalg.eigh(SigmaHat22)

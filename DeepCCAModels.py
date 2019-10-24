@@ -17,23 +17,26 @@ class MlpNet(nn.Module):
             else:
                 layers.append(nn.Sequential(
                     nn.Linear(layer_sizes[l_id], layer_sizes[l_id + 1]),
-                    nn.Sigmoid(),
+                    nn.ReLU(),
                 ))
         self.layers = nn.ModuleList(layers)
 
     def forward(self, x):
         for layer in self.layers:
+
             x = layer(x)
+
         return x
 
 
 class DeepCCA(nn.Module):
-    def __init__(self, layer_sizes1, layer_sizes2, input_size1, input_size2, outdim_size, use_all_singular_values, device=torch.device('cpu')):
+    def __init__(self, layer_sizes1, layer_sizes2, input_size1, input_size2, outdim_size, use_all_singular_values, device=torch.device('cpu'), r1=0, r2=0):
         super(DeepCCA, self).__init__()
         self.model1 = MlpNet(layer_sizes1, input_size1).double()
         self.model2 = MlpNet(layer_sizes2, input_size2).double()
 
-        self.loss = cca_loss(outdim_size, use_all_singular_values, device).loss
+        self.loss = cca_loss(outdim_size, use_all_singular_values, device, r1, r2).loss
+        #self.loss = nn.NLLLoss(w)
 
     def forward(self, x1, x2):
         """

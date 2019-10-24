@@ -1,49 +1,34 @@
 import torch
 import torch.nn as nn
 import numpy as np
+import collections
 from linear_cca import linear_cca
 from torch.utils.data import BatchSampler, SequentialSampler, RandomSampler
 from DeepCCAModels import DeepCCA
-from utils import load_data, svm_classify
-import time
-import logging
-try:
-    import cPickle as thepickle
-except ImportError:
-    import _pickle as thepickle
 
-import gzip
-import numpy as np
-import torch.nn as nn
+import time
+
+from evaluate import evalutateTranslation
+
+from sklearn.model_selection import KFold
+import random
 torch.set_default_tensor_type(torch.DoubleTensor)
 
 
 class Solver():
-    def __init__(self, model, linear_cca, outdim_size, epoch_num, batch_size, learning_rate, reg_par, device=torch.device('cpu')):
+    def __init__(self, model, linear_cca, outdim_size, batch_size, learning_rate, reg_par, device=torch.device('cpu'), momentum = 0):
         self.model = nn.DataParallel(model)
         self.model.to(device)
-        self.epoch_num = epoch_num
         self.batch_size = batch_size
         self.loss = model.loss
-        self.optimizer = torch.optim.RMSprop(
-            self.model.parameters(), lr=learning_rate, weight_decay=reg_par)
+        self.optimizer = torch.optim.SGD(
+            self.model.parameters(), lr=learning_rate, momentum=momentum, weight_decay=reg_par)
         self.device = device
 
         self.linear_cca = linear_cca
 
         self.outdim_size = outdim_size
 
-        formatter = logging.Formatter(
-            "[ %(levelname)s : %(asctime)s ] - %(message)s")
-        logging.basicConfig(
-            level=logging.DEBUG, format="[ %(levelname)s : %(asctime)s ] - %(message)s")
-        self.logger = logging.getLogger("Pytorch")
-        fh = logging.FileHandler("DCCA.log")
-        fh.setFormatter(formatter)
-        self.logger.addHandler(fh)
-
-        self.logger.info(self.model)
-        self.logger.info(self.optimizer)
 
     def fit(self, x1, x2, vx1=None, vx2=None, tx1=None, tx2=None, checkpoint='checkpoint.model'):
         """
@@ -56,18 +41,11 @@ class Solver():
         x2.to(self.device)
 
         data_size = x1.size(0)
-
-        if vx1 is not None and vx2 is not None:
-            best_val_loss = 0
-            vx1.to(self.device)
-            vx2.to(self.device)
-        if tx1 is not None and tx2 is not None:
-            tx1.to(self.device)
-            tx2.to(self.device)
-
+        train_loss = 0
         train_losses = []
-        for epoch in range(self.epoch_num):
-            epoch_start_time = time.time()
+        epoch = 1
+        while True:
+            it = 0
             self.model.train()
             batch_idxs = list(BatchSampler(RandomSampler(
                 range(data_size)), batch_size=self.batch_size, drop_last=False))
@@ -77,51 +55,36 @@ class Solver():
                 batch_x2 = x2[batch_idx, :]
                 o1, o2 = self.model(batch_x1, batch_x2)
                 loss = self.loss(o1, o2)
+                #print(loss)
                 train_losses.append(loss.item())
                 loss.backward()
                 self.optimizer.step()
-            train_loss = np.mean(train_losses)
-
-            info_string = "Epoch {:d}/{:d} - time: {:.2f} - training_loss: {:.4f}"
-            if vx1 is not None and vx2 is not None:
-                with torch.no_grad():
-                    self.model.eval()
-                    val_loss = self.test(vx1, vx2)
-                    info_string += " - val_loss: {:.4f}".format(val_loss)
-                    if val_loss < best_val_loss:
-                        self.logger.info(
-                            "Epoch {:d}: val_loss improved from {:.4f} to {:.4f}, saving model to {}".format(epoch + 1, best_val_loss, val_loss, checkpoint))
-                        best_val_loss = val_loss
-                        torch.save(self.model.state_dict(), checkpoint)
-                    else:
-                        self.logger.info("Epoch {:d}: val_loss did not improve from {:.4f}".format(
-                            epoch + 1, best_val_loss))
+            
+            if train_loss - np.mean(train_losses) <= 1e-3 or epoch >= 100:
+                #print('epoch num is: ', epoch, ' trainloss didnt improve, train loss is:    ', train_loss)
+                it += 1
+                if it >= 5 or epoch >= 100:
+                    print('convergenced, loss is:    ', train_loss)
+                    break
+                
             else:
-                torch.save(self.model.state_dict(), checkpoint)
-            epoch_time = time.time() - epoch_start_time
-            self.logger.info(info_string.format(
-                epoch + 1, self.epoch_num, epoch_time, train_loss))
+                #print('epoch num is: ', epoch, 'improvement is: ', train_loss - np.mean(train_losses))
+                train_loss = np.mean(train_losses)
+            #print('epoc num is: ',epoch, ' current loss is: ', train_loss)
+            epoch = epoch+1 
+
         # train_linear_cca
         if self.linear_cca is not None:
             _, outputs = self._get_outputs(x1, x2)
             self.train_linear_cca(outputs[0], outputs[1])
-
-        checkpoint_ = torch.load(checkpoint)
-        self.model.load_state_dict(checkpoint_)
-        if vx1 is not None and vx2 is not None:
-            loss = self.test(vx1, vx2)
-            self.logger.info("loss on validation data: {:.4f}".format(loss))
-
-        if tx1 is not None and tx2 is not None:
-            loss = self.test(tx1, tx2)
-            self.logger.info('loss on test data: {:.4f}'.format(loss))
-
+              
+    
     def test(self, x1, x2, use_linear_cca=False):
         with torch.no_grad():
             losses, outputs = self._get_outputs(x1, x2)
 
             if use_linear_cca:
-                print("Linear CCA started!")
+                #print("Linear CCA started!")
                 outputs = self.linear_cca.test(outputs[0], outputs[1])
                 return np.mean(losses), outputs
             else:
@@ -151,85 +114,311 @@ class Solver():
                    torch.cat(outputs2, dim=0).cpu().numpy()]
         return losses, outputs
 
+def load_data(path):
+    
+    vol_src,emb_src = read_data(path[0])
+    vol_trg, emb_trg = read_data(path[1])
+    
+    #build test dictionary
+    src_word2ind = {word: i for i, word in enumerate(vol_src)}
+    trg_word2ind = {word: i for i, word in enumerate(vol_trg)}
+    
+    src_indices_train,trg_indices_train = load_dictionary(path[2], src_word2ind, trg_word2ind)
+    src_indices_test,trg_indices_test = load_dictionary(path[3], src_word2ind, trg_word2ind)
 
-if __name__ == '__main__':
-    ############
-    # Parameters Section
+    emb_src = np.array(emb_src, dtype="float32")
+    emb_trg = np.array(emb_trg, dtype="float32")
 
-    device = torch.device('cuda')
-    print("Using", torch.cuda.device_count(), "GPUs")
+    return vol_src, emb_src, vol_trg, emb_trg, src_indices_train, trg_indices_train, src_indices_test, trg_indices_test
+        
+def read_data(path):
+    f = open(path, encoding="utf-8", errors='surrogateescape')
+    dtype = np.float32
+    header = f.readline().split(' ')
+    count = np.int(header[0])
+    dim = int(header[1])
+    words = []
+    matrix = np.empty((count, dim), dtype=dtype)
+    for i in range(count):
+        word, vec = f.readline().split(' ', 1)
+        words.append(word)
+        matrix[i] = np.fromstring(vec, sep=' ', dtype=dtype)
+    return words,matrix
 
-    # the path to save the final learned features
-    save_to = './new_features.gz'
+def load_dictionary(path,src_word2ind,trg_word2ind):
+    src_indices = []
+    trg_indices = []
 
-    # the size of the new space learned by the model (number of the new features)
-    outdim_size = 10
+    f = open(path, encoding="utf-8", errors='surrogateescape')
+    for line in f:
+        src_word,trg_word = line.split()
+        try:
+            src_ind = src_word2ind[src_word]
+            trg_ind = trg_word2ind[trg_word]
+            src_indices.append(src_ind)
+            trg_indices.append(trg_ind)
+        except KeyError:
+            print("OOV words occurs")
+            
+    return src_indices, trg_indices
 
-    # size of the input for view 1 and view 2
-    input_shape1 = 784
-    input_shape2 = 784
+def mean_center(x):
+    avg = np.mean(x, axis=0)
+    x -= avg
+    return x
 
+def length_normalize(x):
+    norms = np.sqrt(np.sum(x**2, axis=1))
+    norms[norms == 0] = 1
+    x /= norms[:, np.newaxis]
+    return x
+
+
+
+
+path = ["/media/jzhao1/498032e5-c16b-4e25-b7b7-5186838340e2/data/CCA/embeddings/en.emb.txt",
+        "/media/jzhao1/498032e5-c16b-4e25-b7b7-5186838340e2/data/CCA/embeddings/de.emb.txt",
+        "/media/jzhao1/498032e5-c16b-4e25-b7b7-5186838340e2/data/CCA/dictionaries/en-de.train.txt", 
+        "/media/jzhao1/498032e5-c16b-4e25-b7b7-5186838340e2/data/CCA/dictionaries/en-de.test.txt"]
+
+vol_src,x,vol_trg,y,src_indices_train,trg_indices_train,src_indices_test, trg_indices_test = load_data(path)
+
+
+x = mean_center(x)
+y = mean_center(y)
+x = length_normalize(x)
+y = length_normalize(y)
+   
+x = torch.Tensor(x)
+y = torch.Tensor(y)
+    
+x_dic = x[src_indices_train]
+y_dic = y[trg_indices_train]
+
+# shuffle the input data
+num_list = [i for i in range(len(x_dic))]
+random.shuffle(num_list)
+x_dic = x_dic[num_list]
+y_dic = y_dic[num_list]
+
+
+src_indices_train = np.array(src_indices_train)
+trg_indices_train = np.array(trg_indices_train)
+src_indices_train = src_indices_train[num_list].tolist()
+trg_indices_train = trg_indices_train[num_list].tolist()
+
+
+def dcca_validate(args):
+    
+    np.set_printoptions(suppress=True, linewidth=2000, precision=15)
+    print(args)
+    outdim_size = args['outdim_size']
+    input_shape1 = 300
+    input_shape2 = 300
     # number of layers with nodes in each one
-    layer_sizes1 = [1024, 1024, 1024, outdim_size]
-    layer_sizes2 = [1024, 1024, 1024, outdim_size]
+    layer_src = []
+    
+    src_layer_size = args['src_layer_size']
+    src_H1_num = args['src_H1_num']
+    src_H2_num = args['src_H2_num']
+    src_H3_num = args['src_H3_num']
+    src_H4_num = args['src_H4_num']
+    
+  #  if src_layer_size == 1:
+   #     layer_src.append(src_H1_num)
+    if src_layer_size == 2:
+        layer_src.append(src_H1_num)
+        layer_src.append(src_H2_num)
+    elif src_layer_size == 3:
+        layer_src.append(src_H1_num)
+        layer_src.append(src_H2_num)
+        layer_src.append(src_H3_num)
+    elif src_layer_size == 4:
+        layer_src.append(src_H1_num)
+        layer_src.append(src_H2_num)
+        layer_src.append(src_H3_num)
+        layer_src.append(src_H4_num)
 
+
+    layer_trg = []
+    trg_layer_size =args['trg_layer_size']
+    trg_H1_num = args['trg_H1_num']
+    trg_H2_num = args['trg_H2_num']
+    trg_H3_num = args['trg_H3_num']
+    trg_H4_num = args['trg_H4_num']
+
+    #if trg_layer_size == 1:
+     #   layer_trg.append(trg_H1_num)
+    if trg_layer_size == 2:
+        layer_trg.append(trg_H1_num)
+        layer_trg.append(trg_H2_num)
+    elif trg_layer_size == 3:
+        layer_trg.append(trg_H1_num)
+        layer_trg.append(trg_H2_num)
+        layer_trg.append(trg_H3_num)
+    elif trg_layer_size == 4:
+        layer_trg.append(trg_H1_num)
+        layer_trg.append(trg_H2_num)
+        layer_trg.append(trg_H3_num)
+        layer_trg.append(trg_H4_num)
+
+    
+    layer_src.append(outdim_size)
+    layer_trg.append(outdim_size)
+    
     # the parameters for training the network
-    learning_rate = 1e-3
-    epoch_num = 1
-    batch_size = 800
+    learning_rate = args['learning_rate']
+    batch_size = args['batch_size']
+    momentum = args['momentum']
+    reg_par = args['reg_par']
+    parameterset = []
 
-    # the regularization parameter of the network
-    # seems necessary to avoid the gradient exploding especially when non-saturating activations are used
-    reg_par = 1e-5
+    parameterset.append(src_layer_size)
+    parameterset.append(trg_layer_size)
+    
+    parameterset.append(src_H1_num)
+    parameterset.append(src_H2_num)
+    parameterset.append(src_H3_num)
+    parameterset.append(src_H4_num)
 
-    # specifies if all the singular values should get used to calculate the correlation or just the top outdim_size ones
-    # if one option does not work for a network or dataset, try the other one
+    parameterset.append(trg_H1_num)
+    parameterset.append(trg_H2_num)
+    parameterset.append(trg_H3_num)
+    parameterset.append(trg_H4_num)
+    
+    
+    parameterset.append(batch_size)
+    parameterset.append(momentum)
+    parameterset.append(learning_rate)
+    parameterset.append(args['r1'])
+    parameterset.append(args['r2'])
+    parameterset.append(args['r3'])
+    parameterset.append(args['r4'])
+    parameterset.append(args['reg_par'])
+    parameterset = np.array(parameterset)
+    
+
+    para = 'corresponding para is: ' + str(parameterset) + '\n'
+    f = open(args['name'], 'a')
+    f.write(para)
+    f.close()
+    
+    
+    
     use_all_singular_values = False
-
-    # if a linear CCA should get applied on the learned features extracted from the networks
-    # it does not affect the performance on noisy MNIST significantly
     apply_linear_cca = True
-    # end of parameters section
-    ############
-
-    # Each view is stored in a gzip file separately. They will get downloaded the first time the code gets executed.
-    # Datasets get stored under the datasets folder of user's Keras folder
-    # normally under [Home Folder]/.keras/datasets/
-    data1 = load_data('./noisymnist_view1.gz')
-    data2 = load_data('./noisymnist_view2.gz')
-    # Building, training, and producing the new features by DCCA
-    model = DeepCCA(layer_sizes1, layer_sizes2, input_shape1,
-                    input_shape2, outdim_size, use_all_singular_values, device=device).double()
     l_cca = None
     if apply_linear_cca:
-        l_cca = linear_cca()
-    solver = Solver(model, l_cca, outdim_size, epoch_num, batch_size,
-                    learning_rate, reg_par, device=device)
-    train1, train2 = data1[0][0], data2[0][0]
-    val1, val2 = data1[1][0], data2[1][0]
-    test1, test2 = data1[2][0], data2[2][0]
+        l_cca = linear_cca(r3 = args['r3'], r4 = args['r4'])
 
-    solver.fit(train1, train2, val1, val2, test1, test2)
-    # TODO: Save l_cca model if needed
+    bst_val_loss = 0 
+    kf = KFold(n_splits=2)
 
-    set_size = [0, train1.size(0), train1.size(
-        0) + val1.size(0), train1.size(0) + val1.size(0) + test1.size(0)]
-    loss, outputs = solver.test(torch.cat([train1, val1, test1], dim=0), torch.cat(
-        [train2, val2, test2], dim=0), apply_linear_cca)
-    new_data = []
-    # print(outputs)
-    for idx in range(3):
-        new_data.append([outputs[0][set_size[idx]:set_size[idx + 1], :],
-                         outputs[1][set_size[idx]:set_size[idx + 1], :], data1[idx][1]])
-    # Training and testing of SVM with linear kernel on the view 1 with new features
-    [test_acc, valid_acc] = svm_classify(new_data, C=0.01)
-    print("Accuracy on view 1 (validation data) is:", valid_acc * 100.0)
-    print("Accuracy on view 1 (test data) is:", test_acc*100.0)
-    # Saving new features in a gzip pickled file specified by save_to
-    print('saving new features ...')
-    f1 = gzip.open(save_to, 'wb')
-    thepickle.dump(new_data, f1)
-    f1.close()
-    d = torch.load('checkpoint.model')
-    solver.model.load_state_dict(d)
-    solver.model.parameters()
+    acc_all = []
+    loss_all = []
+
+    for train, test in kf.split(x_dic):      
+        acc = 0
+        X_train = torch.Tensor(x_dic[train])
+        Y_train = torch.Tensor(y_dic[train])
+
+        src_indices_train_ = np.array(src_indices_train)
+        trg_indices_train_ = np.array(trg_indices_train)
+        
+        validation_idx_src = src_indices_train_[test].tolist()
+        validation_idx_trg = trg_indices_train_[test].tolist()
+
+        model = DeepCCA(layer_src, layer_trg, input_shape1,
+                    input_shape2, outdim_size, use_all_singular_values, device=device, r1=args['r1'], r2 = args['r2']).double()   
+        
+        solver = Solver(model, l_cca, outdim_size, batch_size,
+                    learning_rate, reg_par, device=device, momentum = momentum)
+
+        solver.fit(X_train, Y_train)
+        loss, output = solver.test(x, y, apply_linear_cca)
+        
+        acc = evalutateTranslation(output[0], output[1], vol_src, vol_trg, validation_idx_src, validation_idx_trg, "nn", 5000)
+        print('acc is: ', acc)
+        
+        acc_all.append(acc)        
+        loss_all.append(loss)
+
+        
+        del solver
+        del model
+    
+    
+    acc_avg = float(np.mean(acc_all))
+    acc_std = float(np.std(acc_all))
+
+    loss_avg = float(np.mean(loss_all))
+    loss_std = float(np.std(loss_all))
+    print('eval finished, the avg acc is: ', acc_avg)
+    result_txt = 'acc_avg is: ' + str(acc_avg) + '  acc_std is: ' + str(acc_std)  + '  loss_avg is: ' + str(loss_avg) + '  loss_std is: ' + str(loss_std) +'\n'
+    f = open(args['name'], 'a')
+    f.write(result_txt)
+    f.close()
+
+
+    raw_txt = str(args) + '\n'
+    f = open(args['raw'], 'a')
+    f.write(raw_txt)
+    f.close()
+    return  {'loss': 1-acc_avg, 'status': STATUS_OK}
+
+
+from hyperopt import fmin, tpe, hp, STATUS_OK, Trials
+import argparse
+import hyperopt
+
+
+
+if __name__ == '__main__':
+        
+    device = torch.device('cuda')
+    parser = argparse.ArgumentParser(description="global argument group")
+    parser.add_argument("--name", default = 'result0', type = str,help="using cuda or not")
+    parser.add_argument('--raw', default= 'raw0', type=str, help = 'raw')
+    args = parser.parse_args()
+    name = args.name
+    raw = args.raw
+    fspace = {
+        
+        'outdim_size' : hp.choice('outdim_size', [300]),
+    
+        'src_layer_size' : hp.choice('src_layer_size', [2, 3, 4]),
+        'trg_layer_size' : hp.choice('trg_layer_size', [2, 3, 4]),
+        
+        'src_H1_num' : hp.choice('src_H1_num', [400, 512, 640, 1024, 2048, 4096]),
+        'src_H2_num' : hp.choice('src_H2_num', [640, 1024, 2048, 4096]),
+        'src_H3_num' : hp.choice('src_H3_num', [640, 1024, 2048, 4096]),
+        'src_H4_num' : hp.choice('src_H4_num', [640, 1024, 2048, 4096]),
+
+        'trg_H1_num' : hp.choice('trg_H1_num', [400, 512, 640, 1024, 2048, 4096]),
+        'trg_H2_num' : hp.choice('trg_H2_num', [640, 1024, 2048, 4096]),
+        'trg_H3_num' : hp.choice('trg_H3_num', [640, 1024, 2048, 4096]),
+        'trg_H4_num' : hp.choice('trg_H4_num', [640, 1024, 2048, 4096]),
+        
+
+        'batch_size' : hp.choice('batch_size', [500]),
+        #'momentum': hp.choice('momentum', [0.9]),
+        'momentum' : hp.uniform('momentum', 0, 1),
+        'learning_rate' : hp.loguniform('learning_rate', np.log(1e-5), np.log(1e-2)),
+        #'learning_rate' : hp.choice('learning_rate', [0.01]),
+        #'r1' : hp.choice('r1', [1e-8]),
+        #'r2' : hp.choice('r2', [1e-8]),
+        #'r3' : hp.choice('r3', [1e-4]),
+        #'r4' : hp.choice('r4', [1e-4]),
+        'r1' : hp.loguniform('r1', np.log(1e-9), np.log(1e-5)),
+        'r2' : hp.loguniform('r2', np.log(1e-9), np.log(1e-5)),
+        'r3' : hp.loguniform('r3', np.log(1e-5), np.log(1e-3)),
+        'r4' : hp.loguniform('r4', np.log(1e-5), np.log(1e-3)),
+        #'reg_par' : hp.choice('reg_par', [1e-4]),
+        'reg_par' : hp.loguniform('reg_par', np.log(1e-6), np.log(1e-4)),
+        
+        'name': hp.choice('name', [name]),
+        'raw' : hp.choice('raw', [raw])
+    }
+    trials = Trials()
+    best = fmin(fn=dcca_validate, space=fspace, algo=hyperopt.rand.suggest, max_evals=500, trials=trials)
+    
