@@ -19,7 +19,16 @@ class MlpNet(nn.Module):
                     nn.Linear(layer_sizes[l_id], layer_sizes[l_id + 1]),
                     nn.ReLU(),
                 ))
+        
+        
+        w1 = torch.from_numpy(np.random.normal(0, 0.5, size= layers[0][0].weight.shape))
+        b1 = torch.from_numpy(np.random.normal(0, 0.5, size= layers[0][0].bias.shape))
+        layers[0][0].weight.data = w1
+        layers[0][0].bias.data = b1
+
         self.layers = nn.ModuleList(layers)
+
+ 
 
     def forward(self, x):
         for layer in self.layers:
