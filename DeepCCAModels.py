@@ -10,21 +10,44 @@ class MlpNet(nn.Module):
         layers = []
         layer_sizes = [input_size] + layer_sizes
         for l_id in range(len(layer_sizes) - 1):
+            # output layer
             if l_id == len(layer_sizes) - 2:
+                
+                n_in = layer_sizes[l_id]
+                n_out = layer_sizes[l_id+1]
                 layers.append(
-                    nn.Linear(layer_sizes[l_id], layer_sizes[l_id + 1]),
+                    nn.Linear(n_in, n_out),
                 )
+                
+
+                w_data = layers[l_id].weight.data
+                b_data = layers[l_id].bias.data
+
+                w_output = torch.from_numpy(np.random.normal(0, 0.1, size= (n_out, n_in)))
+                b_output = torch.from_numpy(np.random.normal(0, 0.1, size= n_out))
+                
+                layers[l_id].weight.data = w_output
+                layers[l_id].bias.data = b_output
+            
+            # hidden layers
             else:
+
+                n_in = layer_sizes[l_id]
+                n_out = layer_sizes[l_id+1]
+
                 layers.append(nn.Sequential(
-                    nn.Linear(layer_sizes[l_id], layer_sizes[l_id + 1]),
+                    nn.Linear(n_in, n_out),
                     nn.ReLU(),
                 ))
-        
-        
-        w1 = torch.from_numpy(np.random.normal(0, 0.5, size= layers[0][0].weight.shape))
-        b1 = torch.from_numpy(np.random.normal(0, 0.5, size= layers[0][0].bias.shape))
-        layers[0][0].weight.data = w1
-        layers[0][0].bias.data = b1
+                
+                w_data = layers[l_id][0].weight.data
+                b_data = layers[l_id][0].bias.data
+                
+                w = torch.from_numpy(np.random.normal(0, 0.1, size= (n_out, n_in)))
+                b = torch.from_numpy(np.random.normal(0, 0.1, size= n_out))
+                
+                layers[l_id][0].weight.data = w
+                layers[l_id][0].bias.data = b
 
         self.layers = nn.ModuleList(layers)
 
