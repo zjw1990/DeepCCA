@@ -59,7 +59,7 @@ class Solver():
                 train_losses.append(loss.item())
                 loss.backward()
                 self.optimizer.step()
-            
+        
             if train_loss - np.mean(train_losses) <= 1e-3 or epoch >= 100:
                 #print('epoch num is: ', epoch, ' trainloss didnt improve, train loss is:    ', train_loss)
                 it += 1
@@ -68,9 +68,9 @@ class Solver():
                     break
                 
             else:
-                #print('epoch num is: ', epoch, 'improvement is: ', train_loss - np.mean(train_losses))
+                print('epoch num is: ', epoch, 'improvement is: ', train_loss - np.mean(train_losses))
                 train_loss = np.mean(train_losses)
-            #print('epoc num is: ',epoch, ' current loss is: ', train_loss)
+            print('epoc num is: ',epoch, ' current loss is: ', train_loss)
             epoch = epoch+1 
 
         # train_linear_cca
@@ -382,39 +382,76 @@ if __name__ == '__main__':
     args = parser.parse_args()
     name = args.name
     raw = args.raw
+    # fspace = {
+        
+    #     'outdim_size' : hp.choice('outdim_size', [300]),
+    
+    #     'src_layer_size' : hp.choice('src_layer_size', [2, 3, 4]),
+    #     'trg_layer_size' : hp.choice('trg_layer_size', [2, 3, 4]),
+        
+    #     'src_H1_num' : hp.choice('src_H1_num', [400, 512, 640, 1024, 2048, 4096]),
+    #     'src_H2_num' : hp.choice('src_H2_num', [640, 1024, 2048, 4096]),
+    #     'src_H3_num' : hp.choice('src_H3_num', [640, 1024, 2048, 4096]),
+    #     'src_H4_num' : hp.choice('src_H4_num', [640, 1024, 2048, 4096]),
+
+    #     'trg_H1_num' : hp.choice('trg_H1_num', [400, 512, 640, 1024, 2048, 4096]),
+    #     'trg_H2_num' : hp.choice('trg_H2_num', [640, 1024, 2048, 4096]),
+    #     'trg_H3_num' : hp.choice('trg_H3_num', [640, 1024, 2048, 4096]),
+    #     'trg_H4_num' : hp.choice('trg_H4_num', [640, 1024, 2048, 4096]),
+        
+
+    #     'batch_size' : hp.choice('batch_size', [500]),
+    #     #'momentum': hp.choice('momentum', [0.9]),
+    #     'momentum' : hp.uniform('momentum', 0, 1),
+    #     'learning_rate' : hp.loguniform('learning_rate', np.log(1e-4), np.log(1e-2)),
+    #     #'learning_rate' : hp.choice('learning_rate', [0.01]),
+    #     #'r1' : hp.choice('r1', [1e-8]),
+    #     #'r2' : hp.choice('r2', [1e-8]),
+    #     #'r3' : hp.choice('r3', [1e-4]),
+    #     #'r4' : hp.choice('r4', [1e-4]),
+    #     'r1' : hp.loguniform('r1', np.log(1e-9), np.log(1e-5)),
+    #     'r2' : hp.loguniform('r2', np.log(1e-9), np.log(1e-5)),
+    #     'r3' : hp.loguniform('r3', np.log(1e-5), np.log(1e-3)),
+    #     'r4' : hp.loguniform('r4', np.log(1e-5), np.log(1e-3)),
+    #     #'reg_par' : hp.choice('reg_par', [1e-4]),
+    #     'reg_par' : hp.loguniform('reg_par', np.log(1e-6), np.log(1e-4)),
+        
+    #     'name': hp.choice('name', [name]),
+    #     'raw' : hp.choice('raw', [raw])
+    # }
     fspace = {
         
         'outdim_size' : hp.choice('outdim_size', [300]),
     
-        'src_layer_size' : hp.choice('src_layer_size', [2, 3, 4]),
-        'trg_layer_size' : hp.choice('trg_layer_size', [2, 3, 4]),
+        'src_layer_size' : hp.choice('src_layer_size', [4]),
+        'trg_layer_size' : hp.choice('trg_layer_size', [3]),
         
-        'src_H1_num' : hp.choice('src_H1_num', [400, 512, 640, 1024, 2048, 4096]),
-        'src_H2_num' : hp.choice('src_H2_num', [640, 1024, 2048, 4096]),
-        'src_H3_num' : hp.choice('src_H3_num', [640, 1024, 2048, 4096]),
-        'src_H4_num' : hp.choice('src_H4_num', [640, 1024, 2048, 4096]),
+        'src_H1_num' : hp.choice('src_H1_num', [ 4096]),
+        'src_H2_num' : hp.choice('src_H2_num', [4096]),
+        'src_H3_num' : hp.choice('src_H3_num', [640]),
+        'src_H4_num' : hp.choice('src_H4_num', [2048]),
 
-        'trg_H1_num' : hp.choice('trg_H1_num', [400, 512, 640, 1024, 2048, 4096]),
-        'trg_H2_num' : hp.choice('trg_H2_num', [640, 1024, 2048, 4096]),
-        'trg_H3_num' : hp.choice('trg_H3_num', [640, 1024, 2048, 4096]),
-        'trg_H4_num' : hp.choice('trg_H4_num', [640, 1024, 2048, 4096]),
+        'trg_H1_num' : hp.choice('trg_H1_num', [640]),
+        'trg_H2_num' : hp.choice('trg_H2_num', [640]),
+        'trg_H3_num' : hp.choice('trg_H3_num', [640]),
+        'trg_H4_num' : hp.choice('trg_H4_num', [1024]),
         
 
         'batch_size' : hp.choice('batch_size', [500]),
         #'momentum': hp.choice('momentum', [0.9]),
-        'momentum' : hp.uniform('momentum', 0, 1),
-        'learning_rate' : hp.loguniform('learning_rate', np.log(1e-5), np.log(1e-2)),
+        'momentum' : hp.choice('momentum', [0.897459030481526]),
+        'learning_rate' : hp.choice('learning_rate', [0.000074657962592]),
         #'learning_rate' : hp.choice('learning_rate', [0.01]),
         #'r1' : hp.choice('r1', [1e-8]),
         #'r2' : hp.choice('r2', [1e-8]),
         #'r3' : hp.choice('r3', [1e-4]),
         #'r4' : hp.choice('r4', [1e-4]),
-        'r1' : hp.loguniform('r1', np.log(1e-9), np.log(1e-5)),
-        'r2' : hp.loguniform('r2', np.log(1e-9), np.log(1e-5)),
-        'r3' : hp.loguniform('r3', np.log(1e-5), np.log(1e-3)),
-        'r4' : hp.loguniform('r4', np.log(1e-5), np.log(1e-3)),
+        'r1' : hp.choice('r1', [0.000005059146746]),
+        'r2' : hp.choice('r2', [0.000000027292592]),
+        'r3' : hp.choice('r3', [0.000077780222742]),
+        'r4' : hp.choice('r4', [0.000142218645946]),
         #'reg_par' : hp.choice('reg_par', [1e-4]),
-        'reg_par' : hp.loguniform('reg_par', np.log(1e-6), np.log(1e-4)),
+        'reg_par' : hp.choice('reg_par', [0.000030180150603]),
         
         'name': hp.choice('name', [name]),
         'raw' : hp.choice('raw', [raw])

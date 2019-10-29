@@ -3,9 +3,9 @@ import collections
 
 def evalutateTranslation(x, y, src_words, trg_words, src_indices_test,trg_indices_test, eval_app, batch_size):
     # Build word to index map
-    
     src2trg = collections.defaultdict(set)
-    
+    x = np.array(x, dtype='float32')
+    y = np.array(y, dtype='float32')
     for src_ind,trg_ind in zip(src_indices_test,trg_indices_test):
         src2trg[src_ind].add(trg_ind)
     

@@ -20,11 +20,17 @@ class MlpNet(nn.Module):
                 )
                 
 
-                w_data = layers[l_id].weight.data
-                b_data = layers[l_id].bias.data
+                #w_data = layers[l_id].weight.data
+                #print(torch.mean(w_data))
+                #print(torch.max(w_data))
+                #print(torch.min(w_data))
+                #b_data = layers[l_id].bias.data
 
-                w_output = torch.from_numpy(np.random.normal(0, 0.1, size= (n_out, n_in)))
-                b_output = torch.from_numpy(np.random.normal(0, 0.1, size= n_out))
+                w_output = torch.from_numpy(np.random.normal(0, 0.01, size= (n_out, n_in)))
+                #print(torch.mean(w_output))
+                #print(torch.max(w_output))
+                #print(torch.min(w_output))
+                b_output = torch.from_numpy(np.zeros(n_out))
                 
                 layers[l_id].weight.data = w_output
                 layers[l_id].bias.data = b_output
@@ -40,12 +46,12 @@ class MlpNet(nn.Module):
                     nn.ReLU(),
                 ))
                 
-                w_data = layers[l_id][0].weight.data
-                b_data = layers[l_id][0].bias.data
+                #w_data = layers[l_id][0].weight.data
+                #b_data = layers[l_id][0].bias.data
                 
-                w = torch.from_numpy(np.random.normal(0, 0.1, size= (n_out, n_in)))
-                b = torch.from_numpy(np.random.normal(0, 0.1, size= n_out))
-                
+                w = torch.from_numpy(np.random.normal(0, 0.01, size= (n_out, n_in)))
+                b = torch.from_numpy(np.zeros(n_out))
+
                 layers[l_id][0].weight.data = w
                 layers[l_id][0].bias.data = b
 
